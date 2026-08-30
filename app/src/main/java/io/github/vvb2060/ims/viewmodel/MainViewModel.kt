@@ -21,6 +21,8 @@ import io.github.vvb2060.ims.model.Feature
 import io.github.vvb2060.ims.model.FeatureConfigMapper
 import io.github.vvb2060.ims.model.FeatureValue
 import io.github.vvb2060.ims.model.FeatureValueType
+import io.github.vvb2060.ims.model.ImsDiagnosticsRules
+import io.github.vvb2060.ims.model.ImsRegistrationBlocker
 import io.github.vvb2060.ims.model.AdPlacement
 import io.github.vvb2060.ims.model.ApnDraftConfig
 import io.github.vvb2060.ims.model.BusinessIntentType
@@ -104,6 +106,7 @@ class MainViewModel(private val application: Application) : AndroidViewModel(app
     data class ImsRegisterResult(
         val registered: Boolean?,
         val backendErrorMessage: String?,
+        val failureStage: String? = null,
     )
 
     enum class CaptivePortalFixMode {
@@ -538,11 +541,27 @@ class MainViewModel(private val application: Application) : AndroidViewModel(app
     }
 
     suspend fun registerIms(subId: Int): ImsRegisterResult {
-        if (subId < 0) return ImsRegisterResult(null, "invalid subId")
+        if (subId < 0) {
+            return ImsRegisterResult(null, "invalid subId", "enable_advanced_calling")
+        }
+        val userSettings = ShizukuProvider.updateImsUserSettings(
+            application,
+            subId,
+            advancedCallingEnabled = true,
+        )
+        if (userSettings.errorMessage != null || userSettings.advancedCallingEnabled != true) {
+            val message = userSettings.errorMessage
+                ?: "advanced calling setting is still disabled"
+            toast(
+                application.getString(R.string.ims_enable_advanced_calling_failed, message),
+                false,
+            )
+            return ImsRegisterResult(null, message, "enable_advanced_calling")
+        }
         val resultMsg = ShizukuProvider.restartImsRegistration(application, subId)
         if (resultMsg != null) {
             toast(application.getString(R.string.ims_restart_failed, resultMsg), false)
-            return ImsRegisterResult(null, resultMsg)
+            return ImsRegisterResult(null, resultMsg, "restart_ims")
         }
         val status = waitForImsRegistrationStatus(subId)
         when (status) {
@@ -550,7 +569,7 @@ class MainViewModel(private val application: Application) : AndroidViewModel(app
             false -> toast(application.getString(R.string.ims_register_pending), false)
             null -> toast(application.getString(R.string.ims_register_unknown), false)
         }
-        return ImsRegisterResult(status, null)
+        return ImsRegisterResult(status, null, null)
     }
 
     private suspend fun waitForImsRegistrationStatus(subId: Int): Boolean? {
@@ -1106,7 +1125,7 @@ class MainViewModel(private val application: Application) : AndroidViewModel(app
 
         val binderReady = Shizuku.pingBinder()
         val permissionGranted = Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
-        emitLine("[1/8] Shizuku 检查: binder=${if (binderReady) "已连接" else "未连接"}, permission=${if (permissionGranted) "已授权" else "未授权"}")
+        emitLine("[1/9] Shizuku 检查: binder=${if (binderReady) "已连接" else "未连接"}, permission=${if (permissionGranted) "已授权" else "未授权"}")
         if (!binderReady || !permissionGranted) {
             emitLine("❌ 诊断中止：Shizuku 未就绪。")
             emitLine("=== 诊断结束 ===")
@@ -1114,14 +1133,14 @@ class MainViewModel(private val application: Application) : AndroidViewModel(app
         }
 
         val realSims = visibleSimList.filter { it.subId >= 0 }
-        emitLine("[2/8] SIM 拓扑: 检测到 ${realSims.size} 张可用 SIM")
+        emitLine("[2/9] SIM 拓扑: 检测到 ${realSims.size} 张可用 SIM")
         realSims.forEach { sim ->
             emitLine(
                 "- ${formatSimHeadline(sim)} | MCC/MNC=${sim.mcc}/${sim.mnc}, ISO=${sim.countryIso.ifBlank { "-" }}"
             )
         }
 
-        emitLine("[3/8] IMS 注册状态检测")
+        emitLine("[3/9] IMS 注册状态检测")
         val imsStatusBySubId = linkedMapOf<Int, Boolean?>()
         realSims.forEach { sim ->
             val status = runCatching { readImsRegistrationStatus(sim.subId) }.getOrNull()
@@ -1134,10 +1153,36 @@ class MainViewModel(private val application: Application) : AndroidViewModel(app
             emitLine("- subId=${sim.subId}: IMS $text")
         }
 
-        emitLine("[4/8] CarrierConfig 关键能力读取 (目标 SIM)")
+        emitLine("[4/9] IMS 用户设置 (目标 SIM)")
+        val imsUserSettingsResult = runCatching {
+            ShizukuProvider.updateImsUserSettings(application, selectedSim.subId)
+        }
+        val imsUserSettings = imsUserSettingsResult.getOrNull()
+        val advancedCallingEnabled = imsUserSettings?.advancedCallingEnabled
+        emitLine(
+            "- 高级通话/VoLTE 用户开关 = ${toOnOff(advancedCallingEnabled)}"
+        )
+        emitLine("- Wi-Fi 通话用户开关 = ${toOnOff(imsUserSettings?.voWiFiEnabled)}")
+        imsUserSettingsResult.exceptionOrNull()?.let {
+            emitLine("❌ IMS 用户设置读取失败: ${it.message ?: it.javaClass.simpleName}")
+        }
+        imsUserSettings?.errorMessage?.let {
+            emitLine("❌ IMS 用户设置读取失败: $it")
+        }
+        imsUserSettings?.voWiFiErrorMessage?.let {
+            emitLine("- Wi-Fi 通话开关读取受限: $it")
+        }
+        if (advancedCallingEnabled == false) {
+            emitLine("❌ 已定位：系统高级通话用户开关为 OFF，会直接阻止 VoLTE 注册。")
+        }
+
+        emitLine("[5/9] CarrierConfig 关键能力读取 (目标 SIM)")
         val keyToLabel = linkedMapOf(
             "carrier_volte_available_bool" to "VoLTE",
+            "carrier_volte_provisioning_required_bool" to "VoLTE 需运营商开通",
+            "carrier_volte_provisioned_bool" to "VoLTE 已开通/Provisioned",
             "carrier_wfc_ims_available_bool" to "VoWiFi",
+            "carrier_wfc_ims_provisioned_bool" to "VoWiFi 已开通/Provisioned",
             "carrier_vt_available_bool" to "ViLTE 视频通话",
             "carrier_supports_ss_over_ut_bool" to "UT补充服务",
             "carrier_cross_sim_ims_available_bool" to "跨SIM通话",
@@ -1169,7 +1214,7 @@ class MainViewModel(private val application: Application) : AndroidViewModel(app
             }
         }
 
-        emitLine("[5/8] 实时网络状态 (目标 SIM)")
+        emitLine("[6/9] 实时网络状态 (目标 SIM)")
         val telephony = application.getSystemService(TelephonyManager::class.java)
             ?.createForSubscriptionId(selectedSim.subId)
         val dataTypeResult = runCatching {
@@ -1191,7 +1236,7 @@ class MainViewModel(private val application: Application) : AndroidViewModel(app
         }
         emitLine("- 说明：实时驻网状态与 CarrierConfig 开关不是同一层含义。")
 
-        emitLine("[6/8] App 开关值 vs CarrierConfig 读回 (目标 SIM)")
+        emitLine("[7/9] App 开关值 vs CarrierConfig 读回 (目标 SIM)")
         if (configBundle == null) {
             emitLine("❌ 因 CarrierConfig 读取失败，无法映射功能项")
         } else {
@@ -1216,7 +1261,7 @@ class MainViewModel(private val application: Application) : AndroidViewModel(app
             }
         }
 
-        emitLine("[7/8] 网络验证与国家码覆盖状态")
+        emitLine("[8/9] 网络验证与国家码覆盖状态")
         val captiveState = runCatching { queryCaptivePortalFixState() }.getOrNull()
         if (captiveState == null) {
             emitLine("- 网络验证状态读取失败")
@@ -1228,12 +1273,55 @@ class MainViewModel(private val application: Application) : AndroidViewModel(app
         val savedMcc = loadSavedCountryMccOverride(selectedSim.subId)
         emitLine("- 本地保存 MCC 覆盖 = ${savedMcc.ifBlank { "(空)" }}")
 
-        emitLine("[8/8] 结论")
+        emitLine("[9/9] 结论")
         val selectedImsStatus = imsStatusBySubId[selectedSim.subId]
-        when (selectedImsStatus) {
-            true -> emitLine("✅ 目标 SIM 当前 IMS 已注册，基础链路正常。")
-            false -> emitLine("⚠️ 目标 SIM 当前 IMS 未注册，建议优先检查 VoLTE/VoWiFi/APN(ims) 与运营商侧开通状态。")
-            null -> emitLine("⚠️ 目标 SIM 的 IMS 状态读取失败，建议重试并检查 Shizuku 授权状态。")
+        val volteAvailable = configBundle?.let {
+            if (it.containsKey("carrier_volte_available_bool")) {
+                it.getBoolean("carrier_volte_available_bool")
+            } else {
+                null
+            }
+        }
+        val volteProvisioningRequired = configBundle?.let {
+            if (it.containsKey("carrier_volte_provisioning_required_bool")) {
+                it.getBoolean("carrier_volte_provisioning_required_bool")
+            } else {
+                null
+            }
+        }
+        val volteProvisioned = configBundle?.let {
+            if (it.containsKey("carrier_volte_provisioned_bool")) {
+                it.getBoolean("carrier_volte_provisioned_bool")
+            } else {
+                null
+            }
+        }
+        when (
+            ImsDiagnosticsRules.findRegistrationBlocker(
+                registered = selectedImsStatus,
+                advancedCallingEnabled = advancedCallingEnabled,
+                volteAvailable = volteAvailable,
+                volteProvisioningRequired = volteProvisioningRequired,
+                volteProvisioned = volteProvisioned,
+            )
+        ) {
+            ImsRegistrationBlocker.NONE -> {
+                emitLine("✅ 目标 SIM 当前 IMS 已注册，基础链路正常。")
+            }
+            ImsRegistrationBlocker.ADVANCED_CALLING_DISABLED -> {
+                emitLine("❌ 直接阻塞点：系统高级通话/VoLTE 用户开关为 OFF。请点 IMS 注册，软件会先尝试自动开启，再重启 IMS。")
+            }
+            ImsRegistrationBlocker.VOLTE_UNAVAILABLE -> {
+                emitLine("❌ 直接阻塞点：CarrierConfig 中 VoLTE 能力为 OFF。请先应用 VoLTE 配置。")
+            }
+            ImsRegistrationBlocker.VOLTE_NOT_PROVISIONED -> {
+                emitLine("❌ 直接阻塞点：运营商要求 VoLTE 开通，但当前 Provisioned 为 OFF。需要联系运营商确认号码侧已开通。")
+            }
+            ImsRegistrationBlocker.UNKNOWN -> when (selectedImsStatus) {
+                false -> emitLine("⚠️ 基础开关未发现明确阻塞，IMS 仍未注册；请导出诊断和 radio 日志继续检查运营商拒绝原因。")
+                null -> emitLine("⚠️ 目标 SIM 的 IMS 状态读取失败，建议重试并检查 Shizuku 授权状态。")
+                true -> emitLine("✅ 目标 SIM 当前 IMS 已注册，基础链路正常。")
+            }
         }
         emitLine("=== 诊断结束 ===")
     }
