@@ -18,6 +18,7 @@ import io.github.vvb2060.ims.privileged.CaptivePortalFixer
 import io.github.vvb2060.ims.privileged.ConfigReader
 import io.github.vvb2060.ims.privileged.ImsResetter
 import io.github.vvb2060.ims.privileged.ImsStatusReader
+import io.github.vvb2060.ims.privileged.ImsUserSettings
 import io.github.vvb2060.ims.privileged.ImsModifier
 import io.github.vvb2060.ims.privileged.SimReader
 import kotlinx.coroutines.CompletableDeferred
@@ -48,6 +49,13 @@ class ShizukuProvider : ShizukuProvider() {
             val httpsUrl: String,
             val isCnUrl: Boolean,
             val isOverridden: Boolean,
+        )
+
+        data class ImsUserSettingsState(
+            val advancedCallingEnabled: Boolean?,
+            val voWiFiEnabled: Boolean?,
+            val errorMessage: String?,
+            val voWiFiErrorMessage: String?,
         )
 
         suspend fun overrideImsConfig(context: Context, data: Bundle): String? {
@@ -156,6 +164,45 @@ class ShizukuProvider : ShizukuProvider() {
             }
             Log.i(TAG, "readImsRegistrationStatus: subId=$subId registered=$value")
             return value
+        }
+
+        suspend fun updateImsUserSettings(
+            context: Context,
+            subId: Int,
+            advancedCallingEnabled: Boolean? = null,
+        ): ImsUserSettingsState {
+            val args = Bundle().apply {
+                putInt(ImsUserSettings.BUNDLE_SELECT_SIM_ID, subId)
+                if (advancedCallingEnabled != null) {
+                    putBoolean(
+                        ImsUserSettings.BUNDLE_SET_ADVANCED_CALLING,
+                        advancedCallingEnabled,
+                    )
+                }
+            }
+            val result = startInstrumentation(context, ImsUserSettings::class.java, args, true)
+                ?: return ImsUserSettingsState(
+                    advancedCallingEnabled = null,
+                    voWiFiEnabled = null,
+                    errorMessage = "failed with empty result",
+                    voWiFiErrorMessage = null,
+                )
+
+            val success = result.getBoolean(ImsUserSettings.BUNDLE_RESULT, false)
+            return ImsUserSettingsState(
+                advancedCallingEnabled = result.booleanOrNull(
+                    ImsUserSettings.BUNDLE_ADVANCED_CALLING_ENABLED
+                ),
+                voWiFiEnabled = result.booleanOrNull(ImsUserSettings.BUNDLE_VOWIFI_ENABLED),
+                errorMessage = if (success) {
+                    null
+                } else {
+                    result.getString(ImsUserSettings.BUNDLE_RESULT_MSG) ?: "unknown error"
+                },
+                voWiFiErrorMessage = result.getString(
+                    ImsUserSettings.BUNDLE_VOWIFI_RESULT_MSG
+                ),
+            )
         }
 
         suspend fun updateCarrierConfigBoolean(
@@ -361,5 +408,9 @@ class ShizukuProvider : ShizukuProvider() {
 
         @Suppress("DEPRECATION")
         private fun Bundle.rawValue(key: String): Any? = get(key)
+
+        private fun Bundle.booleanOrNull(key: String): Boolean? {
+            return if (containsKey(key)) getBoolean(key) else null
+        }
     }
 }

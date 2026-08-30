@@ -7,6 +7,10 @@ on:
       - master
     paths:
       - '.github/workflows/android17-test.yml'
+      - 'app/**'
+      - 'stub/**'
+      - 'gradle/**'
+      - '*.gradle.kts'
 
 permissions:
   contents: read
@@ -39,6 +43,15 @@ jobs:
             -keysize 2048 \
             -validity 30 \
             -dname "CN=Android 17 Test,OU=Debug,O=IDEAShin,L=Test,ST=Test,C=US"
+
+      - name: Run unit tests
+        env:
+          TURBOIMS_DEBUG_APPLICATION_ID_SUFFIX: .android17test
+          SIGN_KEY_STORE_FILE: ${{ runner.temp }}/android17-debug.jks
+          SIGN_KEY_STORE_PASSWORD: android17test
+          SIGN_KEY_ALIAS: android17debug
+          SIGN_KEY_PASSWORD: android17test
+        run: ./gradlew testDebugUnitTest
 
       - name: Build debug APK
         env:
