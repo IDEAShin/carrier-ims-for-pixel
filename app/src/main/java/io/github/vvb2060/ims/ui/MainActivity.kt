@@ -1047,7 +1047,7 @@ class MainActivity : BaseActivity() {
                                         viewModel.appendSwitchFailureLog(
                                             action = "IMS_REGISTER",
                                             subId = sim.subId,
-                                            stage = "restart_ims",
+                                            stage = registerResult.failureStage ?: "restart_ims",
                                             backendMessage = registerResult.backendErrorMessage
                                         )
                                     }
