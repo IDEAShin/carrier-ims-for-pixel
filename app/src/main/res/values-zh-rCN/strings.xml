@@ -283,10 +283,11 @@
     <string name="load_config_current_success">已加载系统当前配置</string>
     <string name="ims_restart_success">IMS 已重启</string>
     <string name="ims_restart_failed">IMS 重启失败：%s</string>
+    <string name="ims_enable_advanced_calling_failed">无法开启系统高级通话/VoLTE 开关：%s</string>
     <string name="ims_register_apply_then_register">正在应用配置并触发 IMS 注册…</string>
     <string name="ims_register_apply_failed">配置应用失败，未触发 IMS 注册：%s</string>
     <string name="ims_register_success">IMS 注册成功</string>
-    <string name="ims_register_pending">IMS 暂未注册成功。可到信号更稳定的位置稍后再试。</string>
+    <string name="ims_register_pending">系统高级通话已开启，但 IMS 尚未完成注册。请运行诊断查看准确阻塞点。</string>
     <string name="ims_register_unknown">IMS 状态读取失败，请稍后重试。</string>
     <string name="select_single_sim">请选中单张 SIM 卡</string>
     <string name="update_shizuku">请更新 Shizuku 到最新版本</string>
