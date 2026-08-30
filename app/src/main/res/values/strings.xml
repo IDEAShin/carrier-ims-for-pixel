@@ -283,10 +283,11 @@
     <string name="load_config_current_success">Loaded current system configuration</string>
     <string name="ims_restart_success">IMS restarted</string>
     <string name="ims_restart_failed">IMS restart failed: %s</string>
+    <string name="ims_enable_advanced_calling_failed">Could not enable the system Advanced Calling/VoLTE setting: %s</string>
     <string name="ims_register_apply_then_register">Applying config, then triggering IMS registration…</string>
     <string name="ims_register_apply_failed">Apply failed, IMS registration not triggered: %s</string>
     <string name="ims_register_success">IMS registered</string>
-    <string name="ims_register_pending">IMS registration did not complete. Move to a steadier signal area and try again.</string>
+    <string name="ims_register_pending">Advanced Calling is enabled, but IMS registration has not completed. Run Diagnostics for the exact blocker.</string>
     <string name="ims_register_unknown">IMS status read failed. Try again shortly.</string>
     <string name="select_single_sim">Please select a single SIM</string>
     <string name="update_shizuku">Please update Shizuku to the latest version</string>
